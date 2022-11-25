@@ -1,5 +1,6 @@
 #![no_std]
 
+mod drawable;
 use core::convert::TryInto;
 
 use bsp::hal::{
@@ -8,6 +9,10 @@ use bsp::hal::{
         PIOExt, PinDir, PinState, ShiftDirection, StateMachine, StateMachineIndex, Tx,
         UninitStateMachine, ValidStateMachine, PIO,
     },
+};
+use embedded_graphics::{
+    pixelcolor::Rgb888,
+    prelude::{Point, RgbColor},
 };
 use rp_pico as bsp;
 
@@ -23,17 +28,6 @@ pub const HEIGHT: usize = 7;
 struct Bitstream {
     data: [u8; BITSTREAM_LENGTH as usize],
 }
-
-impl Bitstream {
-    const fn new() -> Self {
-        Self {
-            data: [0; BITSTREAM_LENGTH as usize],
-        }
-    }
-}
-
-#[no_mangle]
-static mut BITSTREAM: Bitstream = Bitstream::new();
 
 pub struct UnicornPins {
     pub led_blank: Pin<Gpio11, FunctionPio0>,
@@ -61,6 +55,7 @@ where
     sm: StateMachine<SM, rp_pico::hal::pio::Running>,
     tx: Tx<SM>,
     pins: UnicornDynPins,
+    bitstream: Bitstream,
 }
 
 impl<'pio, P, SM> Unicorn<'pio, P, (P, SM)>
@@ -77,9 +72,9 @@ where
         pins: UnicornPins,
     ) -> Unicorn<'pio, P, (P, SM)> {
         let program = Self::build_program();
-        Self::init_bitstream_rs();
+        let bitstream = Self::init_bitstream_rs();
         // Install the program into PIO instruction memory.
-        let installed = pio.install(&program).unwrap();
+        let installed_program = pio.install(&program).unwrap();
 
         let led_blank: DynPin = pins.led_blank.into();
         let led_latch: DynPin = pins.led_latch.into();
@@ -93,7 +88,7 @@ where
         let row_5: DynPin = pins.row_5.into();
         let row_6: DynPin = pins.row_6.into();
 
-        let (mut sm, _rx, tx) = bsp::hal::pio::PIOBuilder::from_program(installed)
+        let (mut sm, _rx, tx) = bsp::hal::pio::PIOBuilder::from_program(installed_program)
             .buffers(bsp::hal::pio::Buffers::OnlyTx)
             .out_pins(row_6.id().num, 7)
             .side_set_pin_base(led_clock.id().num)
@@ -136,7 +131,13 @@ where
             led_blank, led_latch, led_clock, led_data, row_0, row_1, row_2, row_3, row_4, row_5,
             row_6,
         ]);
-        Self { pio, sm, tx, pins }
+        Self {
+            pio,
+            sm,
+            tx,
+            pins,
+            bitstream,
+        }
     }
 
     fn build_program() -> pio::Program<32_usize> {
@@ -213,7 +214,8 @@ where
         .program
     }
 
-    pub fn init_bitstream_rs() {
+    fn init_bitstream_rs() -> Bitstream {
+        let mut data = [0; BITSTREAM_LENGTH as usize];
         // initialise the bcd timing values and row selects in the bitstream
         for row in 0..HEIGHT {
             for frame in 0..BCD_FRAMES {
@@ -227,25 +229,22 @@ where
                 // the last bcd frame is used to allow the fets to discharge to avoid ghosting
                 if frame == BCD_FRAMES - 1usize {
                     let bcd_ticks: u16 = 65535;
-                    unsafe {
-                        BITSTREAM.data[row_select_offset] = 0b11111111;
-                        BITSTREAM.data[bcd_offset + 1] = ((bcd_ticks & 0xff00) >> 8) as u8;
-                        BITSTREAM.data[bcd_offset] = (bcd_ticks & 0xff) as u8;
-                        for col in 0..6 {
-                            BITSTREAM.data[offset + col] = 0xff;
-                        }
+                    data[row_select_offset] = 0b11111111;
+                    data[bcd_offset + 1] = ((bcd_ticks & 0xff00) >> 8) as u8;
+                    data[bcd_offset] = (bcd_ticks & 0xff) as u8;
+                    for col in 0..6 {
+                        data[offset + col] = 0xff;
                     }
                 } else {
                     let row_select_mask = !(1 << (7 - row));
                     let bcd_ticks: u16 = 1 << frame;
-                    unsafe {
-                        BITSTREAM.data[row_select_offset] = row_select_mask;
-                        BITSTREAM.data[bcd_offset + 1] = ((bcd_ticks & 0xff00) >> 8) as u8;
-                        BITSTREAM.data[bcd_offset] = (bcd_ticks & 0xff) as u8;
-                    }
+                    data[row_select_offset] = row_select_mask;
+                    data[bcd_offset + 1] = ((bcd_ticks & 0xff00) >> 8) as u8;
+                    data[bcd_offset] = (bcd_ticks & 0xff) as u8;
                 }
             }
         }
+        Bitstream { data }
     }
 }
 
@@ -284,7 +283,7 @@ where
         )
     }
 
-    pub fn set_pixel_rgb(&mut self, x: u8, y: u8, r: u8, g: u8, b: u8) {
+    fn set_pixel_rgb(&mut self, x: u8, y: u8, r: u8, g: u8, b: u8) {
         let x = x as usize;
         let y = y as usize;
         if x >= WIDTH || y >= HEIGHT {
@@ -317,14 +316,10 @@ where
             rgbd <<= shift;
 
             // clear existing data
-            unsafe {
-                BITSTREAM.data[offset + byte_offset] &= !nibble_mask;
-            }
+            self.bitstream.data[offset + byte_offset] &= !nibble_mask;
 
             // set new data
-            unsafe {
-                BITSTREAM.data[offset + byte_offset] |= rgbd as u8;
-            }
+            self.bitstream.data[offset + byte_offset] |= rgbd as u8;
 
             gr >>= 1;
             gg >>= 1;
@@ -333,51 +328,10 @@ where
     }
 
     pub fn draw(&mut self) {
-        for batch in unsafe { BITSTREAM.data.chunks_exact(4) } {
+        for batch in self.bitstream.data.chunks_exact(4) {
             while !self.tx.write(u32::from_le_bytes(unsafe {
                 batch.try_into().unwrap_unchecked()
             })) {}
         }
-    }
-}
-
-#[cfg(feature = "graphics")]
-use embedded_graphics_core::{
-    draw_target::DrawTarget,
-    geometry::Size,
-    geometry::{Dimensions, OriginDimensions},
-    pixelcolor::Rgb888,
-    prelude::*,
-};
-
-#[cfg(feature = "graphics")]
-impl<'pio, P, SM> DrawTarget for Unicorn<'pio, P, SM>
-where
-    P: PIOExt + FunctionConfig,
-    SM: ValidStateMachine<PIO = P>,
-{
-    type Color = Rgb888;
-    type Error = core::convert::Infallible;
-
-    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
-    {
-        let bb = self.bounding_box();
-        pixels
-            .into_iter()
-            .filter(|Pixel(pos, _color)| bb.contains(*pos))
-            .for_each(|Pixel(pos, color)| self.set_pixel(pos, color));
-        Ok(())
-    }
-}
-
-impl<'pio, P, SM> OriginDimensions for Unicorn<'pio, P, SM>
-where
-    P: PIOExt + FunctionConfig,
-    SM: ValidStateMachine<PIO = P>,
-{
-    fn size(&self) -> Size {
-        Size::new(WIDTH as u32, HEIGHT as u32)
     }
 }

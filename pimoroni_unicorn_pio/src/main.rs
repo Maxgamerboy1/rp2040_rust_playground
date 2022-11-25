@@ -1,25 +1,28 @@
 //! Simple test of pimoroni unicorn PIO library
 //!
-//!
-//!
 #![no_std]
 #![no_main]
 
+use cortex_m::delay::Delay;
 use cortex_m_rt::entry;
 use defmt::*;
 use defmt_rtt as _;
 use embedded_graphics_core::pixelcolor::Rgb888;
-use embedded_hal::digital::v2::ToggleableOutputPin;
+use embedded_hal::digital::v2::{InputPin, ToggleableOutputPin};
 use panic_probe as _;
 use pimoroni_unicorn_pio::UnicornPins;
 
-use bsp::hal::{clocks::init_clocks_and_plls, pac, pio::PIOExt, sio::Sio, watchdog::Watchdog};
+use bsp::hal::{
+    clocks::init_clocks_and_plls, pac, pio::PIOExt, sio::Sio, watchdog::Watchdog, Clock,
+};
 use rp_pico as bsp;
 
 use embedded_graphics::{
+    mono_font::{iso_8859_4::FONT_5X7, MonoTextStyleBuilder},
     pixelcolor::RgbColor,
     prelude::*,
     primitives::{PrimitiveStyleBuilder, Rectangle},
+    text::Text,
 };
 
 #[entry]
@@ -43,6 +46,8 @@ fn main() -> ! {
     )
     .ok()
     .unwrap();
+
+    let mut delay = Delay::new(_core.SYST, _clocks.system_clock.freq().to_Hz());
 
     let pins = bsp::Pins::new(
         pac.IO_BANK0,
@@ -68,41 +73,42 @@ fn main() -> ! {
 
     let mut uni = pimoroni_unicorn_pio::Unicorn::new(&mut pio, sm0, unipins);
     // Buttons
-    let mut _btn_a = pins.gpio12.into_floating_input();
+    let btn_a = pins.gpio12.into_pull_up_input();
     let mut _btn_b = pins.gpio13.into_floating_input();
     let mut _btn_x = pins.gpio14.into_floating_input();
     let mut _btn_y = pins.gpio15.into_floating_input();
 
     let mut led_pin = pins.led.into_push_pull_output();
 
-    let _ = led_pin.toggle();
-    Rectangle::new(Point::new(1, 5), Size::new(2, 3))
+    led_pin.toggle().unwrap();
+    Rectangle::new(Point::new(0, 0), Size::new(7, 7))
         .into_styled(
             PrimitiveStyleBuilder::new()
-                .stroke_color(Rgb888::RED)
-                .stroke_width(5)
-                .fill_color(Rgb888::GREEN)
+                .stroke_color(Rgb888::BLUE)
+                .stroke_width(1)
+                .fill_color(Rgb888::CSS_ORANGE_RED)
                 .build(),
         )
         .draw(&mut uni)
         .unwrap();
+
+    let clear = Rgb888::new(0, 0, 0);
+    let text = Text::new(
+        "MAX",
+        Point::new(0, 5),
+        MonoTextStyleBuilder::new()
+            .background_color(Rgb888::BLUE)
+            .font(&FONT_5X7)
+            .text_color(Rgb888::RED)
+            .build(),
+    );
+
     loop {
-        let colours = [
-            Rgb888::new(255, 0, 0),
-            Rgb888::new(0, 255, 0),
-            Rgb888::new(0, 0, 255),
-        ];
-        let clear = Rgb888::new(0, 0, 0);
-        for colour in colours {
-            for y in 0..pimoroni_unicorn_pio::HEIGHT as i32 {
-                for x in 0..pimoroni_unicorn_pio::WIDTH as i32 {
-                    uni.set_pixel(Point::new(x, y), colour);
-                    uni.draw();
-                    uni.set_pixel(Point::new(x, y), clear);
-                }
-            }
+        if btn_a.is_low().unwrap() {
+            uni.clear(clear).unwrap();
+            text.draw(&mut uni).unwrap();
         }
+
+        uni.draw();
     }
 }
-
-// End of file
