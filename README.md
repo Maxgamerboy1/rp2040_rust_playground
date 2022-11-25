@@ -1,22 +1,10 @@
-# rp2040_rust_playground
-A collection of (small) Rust projects targeting the rp2040 microcontroller
+# pimoroni_unicorn
+Simple rust wrapper for pimoroni unicorn - pio implementation for controlling the matrix
 
-[ws2812_8x8] Output a rainbow effect on an 8x8 RGB LED matrix based on ws2812(NeoPixel) addressable LEDs
+Makes use of `embedded_graphics` to allow ease of drawing to display.
+Allows directly setting pixels too.
 
-[pimoroni_pico_display] Simple demo showcase for Pimoroni Pico Display Pack
+LED management is handled by the pico-unicorn example PIO program:
+https://github.com/pimoroni/pimoroni-pico/blob/main/libraries/pico_unicorn/pico_unicorn.pio
 
-[pimoroni_unicorn] Simple test of the pimoroni unicorn - bitbang each pixel of the matrix
-
-[pimoroni_unicorn_pio] Port of Pimoroni's PIO driver to Rust, with an embedded-graphics impl + demo
-
-[ws2812_8x8]: https://github.com/9names/rp2040_rust_playground/tree/main/ws2812_8x8
-[pimoroni_pico_display]: https://github.com/9names/rp2040_rust_playground/tree/main/pimoroni_pico_display
-[pimoroni_unicorn]: https://github.com/9names/rp2040_rust_playground/tree/main/pimoroni_unicorn
-[pimoroni_unicorn_pio]: https://github.com/9names/rp2040_rust_playground/tree/main/pimoroni_unicorn_pio
-
-## License
-
-All examples are dual-licensed under Apache 2.0 and MIT.  
-You may choose to comply with either of the licenses, or both.
-
-SPDX-License-Identifier: Apache-2.0 OR MIT
+Majority of work completed by 9names' [original implementation](https://github.com/9names/rp2040_rust_playground).

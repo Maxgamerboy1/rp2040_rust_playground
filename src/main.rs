@@ -47,7 +47,7 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    let mut delay = Delay::new(_core.SYST, _clocks.system_clock.freq().to_Hz());
+    // let mut delay = Delay::new(_core.SYST, _clocks.system_clock.freq().to_Hz());
 
     let pins = bsp::Pins::new(
         pac.IO_BANK0,
@@ -94,7 +94,7 @@ fn main() -> ! {
 
     let clear = Rgb888::new(0, 0, 0);
     let text = Text::new(
-        "MAX",
+        "123",
         Point::new(0, 5),
         MonoTextStyleBuilder::new()
             .background_color(Rgb888::BLUE)
